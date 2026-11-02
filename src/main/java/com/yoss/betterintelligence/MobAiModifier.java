@@ -115,12 +115,11 @@ public class MobAiModifier {
         List<Mob> nearbyMobs = level.getEntitiesOfClass(Mob.class, area, mob -> mob instanceof Enemy);
 
         for (Mob mob : nearbyMobs) {
-            double distanceSqr = mob.distanceToSqr(Vec3.atCenterOf(sourcePos));
-
-            if (distanceSqr > 144.0 && level.getRandom().nextDouble() > probability) {
+            if (level.getRandom().nextDouble() > probability) {
                 continue;
             }
 
+            double distanceSqr = mob.distanceToSqr(Vec3.atCenterOf(sourcePos));
             double currentMaxRadius = baseRadius;
 
             HitResult hitResult = level.clip(new ClipContext(
@@ -132,7 +131,6 @@ public class MobAiModifier {
             ));
 
             if (hitResult.getType() == HitResult.Type.BLOCK) {
-                // Si el sonido choca con la pared, se usa el radio amortiguado (12 para pasos, 50 para explosiones)
                 currentMaxRadius = muffledRadius;
             }
 

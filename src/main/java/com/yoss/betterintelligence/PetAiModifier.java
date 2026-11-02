@@ -12,9 +12,7 @@ import net.minecraft.world.entity.animal.fox.Fox;
 import net.minecraft.world.entity.animal.wolf.Wolf;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.monster.skeleton.Skeleton;
 import net.minecraft.world.entity.monster.Witch;
-import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
@@ -65,7 +63,7 @@ public class PetAiModifier {
         }
     }
 
-    // INTERACIÓN JUGADOR A ZORRO
+    // INTERACT JUGADOR A ZORRO
     @SubscribeEvent
     public static void onInteractFox(PlayerInteractEvent.EntityInteract event) {
         if (event.getHand() != net.minecraft.world.InteractionHand.MAIN_HAND) return;
@@ -81,7 +79,7 @@ public class PetAiModifier {
                 ItemStack playerHand = player.getItemInHand(event.getHand());
                 ItemStack foxMouth = fox.getItemBySlot(EquipmentSlot.MAINHAND);
 
-                // REGLA DE SEGUIMIENTO
+                // REGLA DE seguimiento
                 if (playerHand.is(Items.SWEET_BERRIES)) {
                     fox.getPersistentData().putInt("ContratoMercenario", fox.tickCount + 6000);
                     fox.playSound(net.minecraft.sounds.SoundEvents.FOX_EAT, 1.0F, 1.0F);
@@ -137,19 +135,55 @@ public class PetAiModifier {
         }
 
         if (event.getEntity() instanceof Wolf wolf) {
-            wolf.targetSelector.addGoal(1, new WolfPackTargetGoal<>(wolf, Skeleton.class, true));
-            wolf.targetSelector.addGoal(2, new WolfRandomHostileGoal(wolf));
-            wolf.targetSelector.addGoal(3, new WolfPackTargetGoal<>(wolf, Zombie.class, true));
+            // --- SISTEMA DE GENÉTICA Y Emociones ---
+            if (!wolf.getPersistentData().contains("EsMiedoso")) {
+                boolean cobarde = wolf.getRandom().nextFloat() < 0.15F;
+                wolf.getPersistentData().putBoolean("EsMiedoso", cobarde);
+            }
 
+            // --- TAMAÑO FÍSICO SEGÚN EDAD Y Personalidad ---
+            var scaleAttr = wolf.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.SCALE);
+            if (scaleAttr != null) {
+                if (wolf.isBaby()) {
+                    scaleAttr.setBaseValue(1.0D);
+                } else {
+                    boolean esMiedoso = wolf.getPersistentData().getBoolean("EsMiedoso").orElse(false);
+                    if (esMiedoso) {
+                        scaleAttr.setBaseValue(0.85D);
+                    } else {
+                        scaleAttr.setBaseValue(1.0D);
+                    }
+                }
+            }
+
+            // --- REMOVER EL "ROGAR" DE MINECRAFT PARA NO INTERRUMPIR APAREAMIENTO ---
+            wolf.goalSelector.getAvailableGoals().removeIf(prioritizedGoal -> {
+                net.minecraft.world.entity.ai.goal.Goal goal = prioritizedGoal.getGoal();
+                return goal instanceof net.minecraft.world.entity.ai.goal.BegGoal ||
+                        goal instanceof net.minecraft.world.entity.ai.goal.TemptGoal;
+            });
+
+            // --- AÑADIR TUS METAS ---
+            wolf.targetSelector.addGoal(1, new WolfPackTargetGoal<>(wolf, net.minecraft.world.entity.monster.skeleton.Skeleton.class, true));
+            wolf.targetSelector.addGoal(2, new WolfRandomHostileGoal(wolf));
+            wolf.targetSelector.addGoal(3, new WolfPackTargetGoal<>(wolf, net.minecraft.world.entity.monster.zombie.Zombie.class, true));
+
+            // Añadimos la nueva meta de curación con altísima prioridad (2)
             wolf.goalSelector.addGoal(3, new WolfFleeCreeperGoal(wolf, 8.0F, 1.5D));
+            wolf.goalSelector.addGoal(4, new WolfFearDarknessGoal(wolf, 1.2D));
         }
 
         if (event.getEntity() instanceof Cat cat) {
             cat.setPathfindingMalus(PathType.WATER, -1.0F);
             cat.goalSelector.addGoal(3, new CatChaseCreeperGoal(cat, 1.2D, 10.0D));
+            cat.goalSelector.addGoal(4, new CatWarnDangerGoal(cat));
         }
 
         if (event.getEntity() instanceof Fox fox) {
+            fox.goalSelector.getAvailableGoals().removeIf(prioritizedGoal ->
+                    prioritizedGoal.getGoal().getClass().getSimpleName().contains("Sleep")
+            );
+
             fox.setPathfindingMalus(PathType.LAVA, -1.0F);
 
             // Limpiamos los instintos de rayos X
@@ -158,12 +192,36 @@ public class PetAiModifier {
                             prioritizedGoal.getGoal().getClass().getSimpleName().contains("NearestAttackableTargetGoal")
             );
 
-            // OBJETIVOS TÁCTICOS (La visión - Quien es el enemigo)
-            fox.targetSelector.addGoal(1, new FoxMercenaryTargetGoal(fox));
-            fox.targetSelector.addGoal(2, new FoxSquadTargetGoal<>(fox, Phantom.class, 3, false));
-            fox.targetSelector.addGoal(3, new FoxSquadTargetGoal<>(fox, Chicken.class, 2, true));
+            // Objetivos TÁCTICOS (La visión - Quien es el enemigo)
 
-            // 4. NUEVA PERSONALIDAD: El Guardaespaldas Calculador
+            // 0. supervivencia propia: Si alguien le pega, ese es el objetivo a destruir.
+            fox.targetSelector.addGoal(0, new net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal(fox));
+
+            // 1. El Guardaespaldas: Proteger a su jefe de amenazas inminentes es lo más importante.
+            fox.targetSelector.addGoal(1, new net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal<>(fox, net.minecraft.world.entity.monster.Monster.class, 10, true, false, (entity, _) -> {
+                if (entity instanceof net.minecraft.world.entity.Mob enemyMob) {
+                    net.minecraft.world.entity.LivingEntity enemyTarget = enemyMob.getTarget();
+                    if (enemyTarget instanceof net.minecraft.world.entity.player.Player targetPlayer) {
+                        if (com.yoss.betterintelligence.FoxTrustHelper.trusts(fox, targetPlayer)) return true;
+                    }
+                }
+                java.util.List<net.minecraft.world.entity.player.Player> nearbyPlayers = fox.level().getEntitiesOfClass(net.minecraft.world.entity.player.Player.class, entity.getBoundingBox().inflate(4.5D));
+                for (net.minecraft.world.entity.player.Player player : nearbyPlayers) {
+                    if (com.yoss.betterintelligence.FoxTrustHelper.trusts(fox, player)) return true;
+                }
+                return false;
+            }));
+
+            // 2. Venganza del jefe (Mercenario): Si tú atacas a alguien o alguien te pegó primero.
+            fox.targetSelector.addGoal(2, new FoxMercenaryTargetGoal(fox));
+
+            // 3. Caza Mayor (Fantasmas): Peligros del cielo.
+            fox.targetSelector.addGoal(3, new FoxSquadTargetGoal<>(fox, Phantom.class, 3, false));
+
+            // 4. Diversión y Comida (Gallinas): Mínima prioridad táctica. No ignorará un monstruo por una gallina.
+            fox.targetSelector.addGoal(4, new FoxSquadTargetGoal<>(fox, Chicken.class, 2, true));
+
+            // 4. NUEVA Personalidad: El Guardaespaldas Calculador
             fox.targetSelector.addGoal(4, new net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal<>(fox, net.minecraft.world.entity.monster.Monster.class, 10, true, false, (entity, _) -> {
                 // 1. Intercepción: ¿El enemigo quiere atacar a mi jefe?
                 if (entity instanceof net.minecraft.world.entity.Mob enemyMob) {
@@ -171,7 +229,7 @@ public class PetAiModifier {
 
                     // Si el monstruo tiene en la mira a un jugador...
                     if (enemyTarget instanceof net.minecraft.world.entity.player.Player targetPlayer) {
-                        // USAMOS NUESTRA GANZÚA PARA PREGUNTAR
+                        // Usamos Nuestra GANZÚA PARA PREGUNTAR
                         if (com.yoss.betterintelligence.FoxTrustHelper.trusts(fox, targetPlayer)) {
                             return true; // ¡Cruzó la línea, lo intercepto!
                         }
@@ -182,7 +240,7 @@ public class PetAiModifier {
                 java.util.List<net.minecraft.world.entity.player.Player> nearbyPlayers = fox.level().getEntitiesOfClass(net.minecraft.world.entity.player.Player.class, entity.getBoundingBox().inflate(4.5D));
 
                 for (net.minecraft.world.entity.player.Player player : nearbyPlayers) {
-                    // USAMOS NUESTRA GANZÚA OTRA VEZ
+                    // Usamos Nuestra GANZÚA OTRA VEZ
                     if (com.yoss.betterintelligence.FoxTrustHelper.trusts(fox, player)) {
                         return true; // ¡Se acercó demasiado, lo elimino!
                     }
@@ -191,37 +249,51 @@ public class PetAiModifier {
                 return false;
             }));
 
-            // OBJETIVOS DE COMPORTAMIENTO (El cerebro - Qué hacer y en qué orden)
+            // Objetivos DE COMPORTAMIENTO (El cerebro - Qué hacer y en qué orden)
 
-            // 1. Candado y Supervivencia (Prioridad Máxima)
+            // --- FASE DE Reflejos Absolutos ---
+            // 0. Candado: siempre activo, no afecta sus patas.
             fox.goalSelector.addGoal(0, new FoxWeaponLockGoal(fox));
-            fox.goalSelector.addGoal(1, new FoxTerrainParkourGoal(fox));
-            fox.goalSelector.addGoal(2, new PetAiModifier.FoxPassiveLavaEvasionGoal(fox));
+            // 1. Evitar la lava: ¡La muerte por quemaduras es peor que todo lo demás!
+            fox.goalSelector.addGoal(1, new PetAiModifier.FoxPassiveLavaEvasionGoal(fox));
+            // 2. Emergencia Médica: Si tiene poca vida, huye con su jefe de inmediato.
+            fox.goalSelector.addGoal(2, new FoxTacticalRetreatGoal(fox, 1.5D));
 
-            // 2. Emergencia Médica (Si me muero, huyo antes de pelear)
-            fox.goalSelector.addGoal(3, new FoxTacticalRetreatGoal(fox, 1.5D));
-
-            // 3. Combate Táctico (Prioridad Alta)
-            fox.goalSelector.addGoal(4, new FoxAttackPhantomGoal(fox, 1.4D));
-            fox.goalSelector.addGoal(5, new FoxTacticalMeleeGoal(fox, 1.7D));
-
-            // 4. Utilidad y Seguimiento
-            fox.goalSelector.addGoal(6, new FoxTrackOreGoal(fox));
-            fox.goalSelector.addGoal(7, new FoxFollowBerryGoal(fox, 1.2D)); // Te sigue si te alejas mucho
-
-            // 5. Merodeo Libre (Para que no sea una estatua si estás cerca)
-            fox.goalSelector.addGoal(8, new net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal(fox, 1.0D) {
+            // --- FASE DE REACCIÓN (NUEVO) ---
+            // 3. Miedo a los lobos: Huye del depredador si no está ya peleando con uno.
+            fox.goalSelector.addGoal(3, new net.minecraft.world.entity.ai.goal.AvoidEntityGoal<>(fox, Wolf.class, 16.0F, 1.4D, 1.6D) {
                 @Override
                 public boolean canUse() {
-                    // Si el zorro ya está en su ciclo de sueño, anulamos las ganas de caminar
-                    if (fox.isSleeping()) {
-                        return false;
-                    }
+                    if (fox.getTarget() instanceof Wolf) return false; // Si se está defendiendo, no huye.
                     return super.canUse();
                 }
             });
-            // 6. Descanso (Prioridad Mínima)
+
+            // --- FASE TÁCTICA Y COMBATE ---
+            // 4. Parkour: Debe poder saltar paredes tanto para atacar como para huir.
+            fox.goalSelector.addGoal(4, new FoxTerrainParkourGoal(fox));
+            // 5. Combate Aéreo
+            fox.goalSelector.addGoal(5, new FoxAttackPhantomGoal(fox, 1.4D));
+            // 6. Combate Terrestre
+            fox.goalSelector.addGoal(6, new FoxTacticalMeleeGoal(fox, 1.7D));
+
+            // --- FASE DE UTILIDAD Y FIDELIDAD ---
+            // 7. seguimiento de Fidelidad: Si te alejas mucho, te sigue ANTES de ponerse a buscar minerales. (Evita que lo pierdas).
+            fox.goalSelector.addGoal(7, new FoxFollowBerryGoal(fox, 1.2D));
+            // 8. Utilidad: Rastrear minerales (Si el área es segura y no te has ido lejos).
+            fox.goalSelector.addGoal(8, new FoxTrackOreGoal(fox));
+
+            // --- FASE DE DESCANSO ---
+            // 9. Descanso: Si no hay peligro, no hay dueños corriendo y no hay diamantes, busca un árbol y duerme.
             fox.goalSelector.addGoal(9, new FoxSeekShelterSleepGoal(fox, 1.0D));
+            // 10. Merodeo: Si no tiene sueño, camina al azar.
+            fox.goalSelector.addGoal(10, new net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal(fox, 1.0D) {
+                @Override
+                public boolean canUse() {
+                    if (fox.isSleeping()) return false;
+                    return super.canUse();
+                }
+            });
         }
 
         if (event.getEntity() instanceof Chicken chicken) {
@@ -275,7 +347,7 @@ public class PetAiModifier {
             // Invocamos el método y devolvemos el resultado (true/false)
             return (boolean) trustsMethod.invoke(fox, player);
         } catch (Exception e) {
-            // Si algo falla (por seguridad extrema), devolvemos false para que el juego no se crasheé
+            // Si algo falla (por seguridad extrema), devolvemos false para que el juego no se crashed
             return false;
         }
     }
@@ -287,7 +359,7 @@ public class PetAiModifier {
             sleepMethod.setAccessible(true); // Rompemos el candado
             sleepMethod.invoke(fox, sleeping); // Lo ejecutamos
         } catch (Exception e) {
-            // Silencioso por seguridad
+            // silencioso por seguridad
         }
     }
 
@@ -314,7 +386,7 @@ public class PetAiModifier {
         double simY = fox.getY();
         double simZ = fox.getZ();
 
-        // Simulamos 40 ticks (2 segundos de vuelo)
+        // simulamos 40 ticks (2 segundos de vuelo)
         for (int i = 0; i < 40; i++) {
             simX += velX;
             simY += velY;
@@ -431,10 +503,11 @@ public class PetAiModifier {
     public static class PetWaitForFoodGoal extends Goal {
         private final TamableAnimal pet;
         private Player owner;
+        private int timeToRecalcPath;
 
         public PetWaitForFoodGoal(TamableAnimal pet) {
             this.pet = pet;
-            this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+            this.setFlags(java.util.EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
         }
 
         @Override
@@ -443,21 +516,56 @@ public class PetAiModifier {
             Player p = (Player) this.pet.getOwner();
             if (p == null) return false;
 
-            if (this.pet.isFood(p.getMainHandItem()) || this.pet.isFood(p.getOffhandItem())) {
+            // Filtro 0: Si no tienes comida, te ignoran
+            if (!this.pet.isFood(p.getMainHandItem()) && !this.pet.isFood(p.getOffhandItem())) {
+                return false;
+            }
+
+            // Filtro 1: Tienen baja vida.
+            // CORRECCIÓN: Restamos 0.1f para ignorar el bug de decimales de Minecraft
+            if (this.pet.getHealth() < (this.pet.getMaxHealth() - 0.1f)) {
                 this.owner = p;
                 return true;
             }
+
+            // Filtro 2: Están listos para aparearse (Adultos sanos sin cooldown)
+            if (this.pet.canFallInLove()) {
+                this.owner = p;
+                return true;
+            }
+
+            // Filtro 3: Son cachorros (Queremos darles de comer para que crezcan rápido)
+            if (this.pet.isBaby()) {
+                this.owner = p;
+                return true;
+            }
+
+            // EL RECHAZO: Son adultos, tienen vida completa y están en cooldown. ¡Pónganse a vagar!
             return false;
+        }
+
+        @Override
+        public boolean canContinueToUse() {
+            return canUse();
+        }
+
+        @Override
+        public void start() {
+            this.timeToRecalcPath = 0;
         }
 
         @Override
         public void tick() {
             this.pet.getLookControl().setLookAt(this.owner, 10.0F, (float)this.pet.getMaxHeadXRot());
+
             if (this.pet.distanceToSqr(this.owner) > 9.0) {
-                this.pet.getNavigation().moveTo(this.owner, 1.1D);
+                if (--this.timeToRecalcPath <= 0) {
+                    this.timeToRecalcPath = 10;
+                    this.pet.getNavigation().moveTo(this.owner, 1.1D);
+                }
             } else {
                 this.pet.getNavigation().stop();
-                this.pet.setTarget(null);
+                this.timeToRecalcPath = 0;
             }
         }
     }
@@ -540,6 +648,7 @@ public class PetAiModifier {
         private final double speed;
         private final float stopDistance;
         private final float startDistance;
+        private int timeToRecalcPath; // NUEVO: Temporizador
 
         public PetFollowBehindOwnerGoal(TamableAnimal pet, double speed, float startDist, float stopDist) {
             this.pet = pet;
@@ -587,6 +696,11 @@ public class PetAiModifier {
         }
 
         @Override
+        public void start() {
+            this.timeToRecalcPath = 0; // Reiniciamos al iniciar la meta
+        }
+
+        @Override
         public void tick() {
             if (this.owner.isInWater() || this.owner.isSwimming()) {
                 this.pet.setPathfindingMalus(PathType.WATER, 0.0F);
@@ -621,8 +735,15 @@ public class PetAiModifier {
                 dynamicStopDistance += 3.0F;
             }
 
+            // CORRECCIÓN: Solo exige nueva ruta cada 10 ticks (medio segundo)
             if (this.pet.distanceToSqr(targetPos) > (dynamicStopDistance * dynamicStopDistance)) {
-                this.pet.getNavigation().moveTo(targetPos.x, this.owner.getY(), targetPos.z, this.speed);
+                if (--this.timeToRecalcPath <= 0) {
+                    this.timeToRecalcPath = 10;
+                    this.pet.getNavigation().moveTo(targetPos.x, this.owner.getY(), targetPos.z, this.speed);
+                }
+            } else {
+                this.pet.getNavigation().stop();
+                this.timeToRecalcPath = 0;
             }
         }
 
@@ -648,6 +769,7 @@ public class PetAiModifier {
         private final TamableAnimal pet;
         private TamableAnimal alpha;
         private final double speed;
+        private int timeToRecalcPath; // NUEVO
 
         public PetFollowLeaderGoal(TamableAnimal pet, double speed) {
             this.pet = pet;
@@ -692,12 +814,21 @@ public class PetAiModifier {
         }
 
         @Override
+        public void start() {
+            this.timeToRecalcPath = 0;
+        }
+
+        @Override
         public void tick() {
             if (this.alpha != null) {
                 if (this.pet.distanceToSqr(this.alpha) > 4.0) {
-                    this.pet.getNavigation().moveTo(this.alpha, this.speed);
+                    if (--this.timeToRecalcPath <= 0) {
+                        this.timeToRecalcPath = 10;
+                        this.pet.getNavigation().moveTo(this.alpha, this.speed);
+                    }
                 } else {
                     this.pet.getNavigation().stop();
+                    this.timeToRecalcPath = 0;
                 }
             }
         }
@@ -756,6 +887,20 @@ public class PetAiModifier {
         }
     }
 
+    // Método para evitar que el lobo se lance por precipicios mortales al atacar
+    public static boolean isSafeDropToTarget(Wolf wolf, net.minecraft.world.entity.LivingEntity target) {
+        if (target == null) return true;
+
+        double wolfY = wolf.getY();
+        double targetY = target.getY();
+
+        if (wolfY - targetY > 3.5D) {
+            double distanceSq = wolf.distanceToSqr(target);
+            return distanceSq < 25.0D; // ¡Es un risco peligroso, no bajes!
+        }
+        return false;
+    }
+
     public static class WolfRandomHostileGoal extends NearestAttackableTargetGoal<Mob> {
         private final Wolf wolf;
 
@@ -766,9 +911,39 @@ public class PetAiModifier {
 
         @Override
         public boolean canUse() {
+            if (this.wolf.isBaby()) return false;
+
+            LivingEntity owner = this.wolf.getOwner();
+            if (owner != null && this.wolf.distanceToSqr(owner) > 144.0D) {
+                return false;
+            }
+
             if (!super.canUse()) return false;
-            if (!(this.target instanceof Enemy)) return false;
-            if (this.target instanceof Witch) return false;
+            if (!(this.target instanceof Enemy) || this.target instanceof Witch) return false;
+            if (PetAiModifier.isSafeDropToTarget(this.wolf, this.target)) {
+                this.wolf.setTarget(null);
+                return false;
+            }
+            if (PetAiModifier.isLavaBetween(this.wolf, this.target)) return false;
+
+            boolean esMiedoso = this.wolf.getPersistentData().getBoolean("EsMiedoso").orElse(false);
+
+            if (esMiedoso) {
+                long packSize = this.wolf.level().getEntitiesOfClass(Wolf.class, this.wolf.getBoundingBox().inflate(12.0D),
+                        w -> w.isTame() && w.getOwner() == this.wolf.getOwner()).size();
+
+                if (packSize < 3) {
+                    if (this.wolf.getRandom().nextInt(15) == 0) {
+                        this.wolf.playSound(net.minecraft.sounds.SoundEvents.WOLF_WHINE_BABY.value(), 0.7F, 1.2F);
+                        if (this.wolf.level() instanceof net.minecraft.server.level.ServerLevel sl) {
+                            sl.sendParticles(net.minecraft.core.particles.ParticleTypes.SPLASH,
+                                    this.wolf.getX(), this.wolf.getY() + 0.6, this.wolf.getZ(),
+                                    4, 0.3, 0.2, 0.3, 0.0);
+                        }
+                    }
+                    return false;
+                }
+            }
 
             // CORRECCIÓN LAVA
             if (PetAiModifier.isLavaBetween(this.wolf, this.target)) return false;
@@ -782,9 +957,27 @@ public class PetAiModifier {
             return hasArmor || !PetAiModifier.isTargetNearCreeper(this.target, 7.0);
         }
 
+        @SubscribeEvent
+        public static void onWolfTarget(net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent event) {
+            if (event.getEntity() instanceof net.minecraft.world.entity.animal.wolf.Wolf attacker &&
+                    event.getTargetType() instanceof net.minecraft.world.entity.animal.wolf.Wolf target) {
+
+                if (attacker.isTame() && target.isTame() && attacker.getOwner() == target.getOwner()) {
+                    event.setCanceled(true);
+                }
+            }
+        }
+
         @Override
         public boolean canContinueToUse() {
-            if (this.target != null && PetAiModifier.isLavaBetween(this.wolf, this.target)) {
+            // REGLA DE LA CORREA 2: Abortar cacerías que se alejen demasiado
+            LivingEntity owner = this.wolf.getOwner();
+            if (owner != null && this.wolf.distanceToSqr(owner) > 225.0D) { // Límite de 15 bloques
+                this.wolf.setTarget(null); // Olvida al objetivo
+                return false;
+            }
+            if (PetAiModifier.isSafeDropToTarget(this.wolf, this.wolf.getTarget())) {
+                this.wolf.setTarget(null);
                 return false;
             }
             return super.canContinueToUse();
@@ -854,11 +1047,69 @@ public class PetAiModifier {
         }
     }
 
+    public static class WolfFearDarknessGoal extends Goal {
+        private final Wolf wolf;
+        private final double speed;
+        private int timeToRecalcPath; // NUEVO
+
+        public WolfFearDarknessGoal(Wolf wolf, double speed) {
+            this.wolf = wolf;
+            this.speed = speed;
+            this.setFlags(java.util.EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+        }
+
+        @Override
+        public boolean canUse() {
+            if (this.wolf.isBaby() || !this.wolf.isTame() || this.wolf.getTarget() != null || this.wolf.isOrderedToSit()) return false;
+            if (!this.wolf.getPersistentData().getBoolean("EsMiedoso").orElse(false)) return false;
+
+            long packSize = this.wolf.level().getEntitiesOfClass(Wolf.class, this.wolf.getBoundingBox().inflate(12.0D),
+                    w -> w.isTame() && w.getOwner() == this.wolf.getOwner()).size();
+
+            if (packSize >= 3) return false;
+
+            LivingEntity owner = this.wolf.getOwner();
+            if (owner == null) return false;
+
+            int lightLevel = this.wolf.level().getMaxLocalRawBrightness(this.wolf.blockPosition());
+            return lightLevel < 6;
+        }
+
+        @Override
+        public boolean canContinueToUse() {
+            return canUse();
+        }
+
+        @Override
+        public void start() {
+            this.wolf.playSound(net.minecraft.sounds.SoundEvents.WOLF_WHINE_BABY.value(), 0.7F, 1.2F);
+            this.timeToRecalcPath = 0;
+        }
+
+        @Override
+        public void tick() {
+            LivingEntity owner = this.wolf.getOwner();
+            if (owner != null) {
+                this.wolf.getLookControl().setLookAt(owner, 10.0F, (float)this.wolf.getMaxHeadXRot());
+
+                if (this.wolf.distanceToSqr(owner) > 16.0D) {
+                    if (--this.timeToRecalcPath <= 0) {
+                        this.timeToRecalcPath = 10;
+                        this.wolf.getNavigation().moveTo(owner, this.speed);
+                    }
+                } else {
+                    this.wolf.getNavigation().stop();
+                    this.timeToRecalcPath = 0;
+                }
+            }
+        }
+    }
+
     // =====================================================================
     //                       IA DE LOS Gatos
     // =====================================================================
 
-    // ASUSTAR CREEPERS
+    // Asustar CREEPERS
     public static class CatChaseCreeperGoal extends Goal {
         private final Cat cat;
         private Creeper targetCreeper;
@@ -932,6 +1183,45 @@ public class PetAiModifier {
         }
     }
 
+    public static class CatWarnDangerGoal extends Goal {
+        private final Cat cat;
+        private int cooldown = 0; // Para que no sisee como una ametralladora
+
+        public CatWarnDangerGoal(Cat cat) {
+            this.cat = cat;
+        }
+
+        @Override
+        public boolean canUse() {
+            if (!this.cat.isTame() || this.cat.isSleeping()) return false;
+
+            if (this.cooldown > 0) {
+                this.cooldown--;
+                return false;
+            }
+
+            // Escanea 12 bloques a la redonda en busca de hostiles
+            java.util.List<Mob> dangers = this.cat.level().getEntitiesOfClass(
+                    Mob.class,
+                    this.cat.getBoundingBox().inflate(12.0),
+                    entity -> entity instanceof Enemy
+            );
+
+            if (!dangers.isEmpty()) {
+                // Elige un monstruo al azar de los que detectó para mirarlo
+                LivingEntity threat = dangers.getFirst();
+                this.cat.getLookControl().setLookAt(threat, 30.0F, 30.0F);
+
+                // Reproduce el siseo de advertencia (Hiss)
+                this.cat.playSound(net.minecraft.sounds.SoundEvents.CAT_HISS_BABY.value(), 0.8F, 0.5F);
+                // Entra en enfriamiento por 10 segundos (200 ticks) para no saturar tus oídos
+                this.cooldown = 200;
+                return true;
+            }
+            return false;
+        }
+    }
+
     // =====================================================================
     //                       IA DE LOS Zorros
     // =====================================================================
@@ -979,7 +1269,7 @@ public class PetAiModifier {
                 return false;
             }
 
-            // Una vez que empecé a correr hacia ti, no me detengo hasta estar a 3 bloques (9.0 cuadrada)
+            // Una vez que empecé a correr hacia ti, no me detengo hasta estar a 3 bloques (9.0)
             return this.fox.distanceToSqr(this.owner) > 9.0;
         }
 
@@ -989,7 +1279,7 @@ public class PetAiModifier {
             this.fox.getLookControl().setLookAt(this.owner, 10.0F, (float)this.fox.getMaxHeadXRot());
             double dist = this.fox.distanceToSqr(this.owner);
 
-            // Si te alejas a más de 16 bloques (256 cuadrada), hace teleport
+            // Si te alejas a más de 16 bloques (256), hace teleport
             if (dist >= 256.0) {
                 BlockPos safeGround = findSafeGroundFox(this.fox.level(), this.owner.getX(), this.owner.getY(), this.owner.getZ());
                 if (safeGround != null) {
@@ -1136,7 +1426,7 @@ public class PetAiModifier {
         }
     }
 
-    // ATAQUE DEPREDADOR TERRESTRE
+    // ATAQUE DEPREDADOR Terrestre
     public static class FoxTacticalMeleeGoal extends MeleeAttackGoal {
         private final Fox fox;
         private boolean isPreparingJump = false;
@@ -1311,10 +1601,11 @@ public class PetAiModifier {
         }
     }
 
-    // RASTREADOR DE MINERALES
+    // Rastreador DE Minerales
     public static class FoxTrackOreGoal extends Goal {
         private final Fox fox;
         private BlockPos targetOre;
+        private int scanCooldown = 0;
 
         public FoxTrackOreGoal(Fox fox) {
             this.fox = fox;
@@ -1324,13 +1615,19 @@ public class PetAiModifier {
         @Override
         public boolean canUse() {
             if (this.fox.isBaby()) return false;
-
             ItemStack mouthItem = this.fox.getItemBySlot(EquipmentSlot.MAINHAND);
             if (mouthItem.isEmpty()) return false;
 
             if (this.targetOre == null) {
+                if (this.scanCooldown > 0) {
+                    this.scanCooldown--;
+                    return false;
+                }
+
                 this.targetOre = findClosestOre(mouthItem);
+                this.scanCooldown = 40;
             }
+
             return this.targetOre != null;
         }
 
@@ -1373,6 +1670,7 @@ public class PetAiModifier {
             this.targetOre = null;
             this.fox.setSitting(false);
             this.fox.getNavigation().stop();
+            this.scanCooldown = 40;
         }
 
         private BlockPos findClosestOre(ItemStack stack) {
@@ -1387,7 +1685,6 @@ public class PetAiModifier {
                         BlockState state = this.fox.level().getBlockState(checkPos);
 
                         if (isMatchingOre(state, stack)) {
-                            // CORRECCIÓN ANTI-YOYO: Penalizamos el eje Y (x4) para que el zorro prefiera buscar minerales en el mismo piso
                             double dX = checkPos.getX() - foxPos.getX();
                             double dY = checkPos.getY() - foxPos.getY();
                             double dZ = checkPos.getZ() - foxPos.getZ();
@@ -1444,7 +1741,7 @@ public class PetAiModifier {
                 return false; // Hay un techo, no puede saltar
             }
 
-            // NUEVO: SENSOR DE ATERRIZAJE SEGURO
+            // NUEVO: SENSOR DE ATERRIZAJE seguro
             // Calculamos exactamente dónde caerá el zorro multiplicando su vector de mirada
             Vec3 look = this.fox.getLookAngle();
             BlockPos landingSpot = BlockPos.containing(
@@ -1509,6 +1806,7 @@ public class PetAiModifier {
         private final Fox fox;
         private BlockPos shelterPos;
         private final double speed;
+        private boolean isSleeping = false;
 
         public FoxSeekShelterSleepGoal(Fox fox, double speed) {
             this.fox = fox;
@@ -1539,18 +1837,40 @@ public class PetAiModifier {
 
         @Override
         public boolean canContinueToUse() {
-            return isDaytime() && this.fox.getTarget() == null && this.shelterPos != null;
+            if (this.fox.getLastHurtByMob() != null || this.fox.getTarget() != null) {
+                return false;
+            }
+            return isDaytime() && this.shelterPos != null;
+        }
+
+        @Override
+        public void start(){
+            this.isSleeping = false;
         }
 
         @Override
         public void tick() {
             if (this.shelterPos != null) {
-                if (this.fox.distanceToSqr(Vec3.atCenterOf(this.shelterPos)) > 2.0) {
+                double dist = this.fox.distanceToSqr(Vec3.atCenterOf(this.shelterPos));
+
+                if (this.isSleeping) {
+                    if (dist > 16.0) {
+                        this.isSleeping = false;
+                        PetAiModifier.setFoxSleeping(this.fox, false);
+                    } else {
+                        this.fox.getNavigation().stop();
+                        PetAiModifier.setFoxSleeping(this.fox, true);
+                        return;
+                    }
+                }
+
+                if (dist > 2.5) {
                     this.fox.getNavigation().moveTo(this.shelterPos.getX(), this.shelterPos.getY(), this.shelterPos.getZ(), this.speed);
-                    PetAiModifier.setFoxSleeping(this.fox, false); // Despierta para caminar
+                    PetAiModifier.setFoxSleeping(this.fox, false);
                 } else {
                     this.fox.getNavigation().stop();
-                    PetAiModifier.setFoxSleeping(this.fox, true); // Usa nuestra herramienta para dormir
+                    PetAiModifier.setFoxSleeping(this.fox, true);
+                    this.isSleeping = true;
                 }
             }
         }
@@ -1558,7 +1878,8 @@ public class PetAiModifier {
         @Override
         public void stop() {
             this.shelterPos = null;
-            PetAiModifier.setFoxSleeping(this.fox, false); // Se despierta al cancelar
+            this.isSleeping = false;
+            PetAiModifier.setFoxSleeping(this.fox, false);
         }
 
         private BlockPos findTreeShelter() {
@@ -1570,9 +1891,7 @@ public class PetAiModifier {
                     BlockPos below = randomPos.below();
                     BlockState floorState = this.fox.level().getBlockState(below);
 
-                    // Si el suelo es sólido
                     if (!floorState.getCollisionShape(this.fox.level(), below).isEmpty()) {
-                        // Si ese bloque NO tiene luz solar directa (hay un techo, árbol, cueva, etc.)
                         if (!this.fox.level().canSeeSky(randomPos)) {
                             return randomPos;
                         }
@@ -1583,7 +1902,7 @@ public class PetAiModifier {
         }
     }
 
-    // RASTREADOR DE ESCUADRONES
+    // Rastreador DE Escuadrones
     public static class FoxSquadTargetGoal<T extends LivingEntity> extends NearestAttackableTargetGoal<T> {
         private final Fox fox;
         private final int maxAttackers;
@@ -1599,7 +1918,6 @@ public class PetAiModifier {
             if (this.fox.isBaby()) return false;
 
             // Primero, dejamos que Minecraft busque el objetivo más cercano
-            // Si devuelve true, el objetivo potencial se guarda en la variable 'this.target'
             if (super.canUse() && this.target != null) {
 
                 // Escaneamos el área (32 bloques alrededor del objetivo) buscando otros zorros
@@ -1630,7 +1948,7 @@ public class PetAiModifier {
         }
     }
 
-    // EVASIÓN PASIVA DE LAVA
+    // EVASIÓN Pasiva DE LAVA
     public static class FoxPassiveLavaEvasionGoal extends Goal {
         private final Fox fox;
         private Vec3 escapeRoute = null;
@@ -1708,7 +2026,7 @@ public class PetAiModifier {
 
         @Override
         public boolean canContinueToUse() {
-            // EL SECRETO ESTÁ AQUÍ: Si ya salió de la zona de peligro, detiene la huida de inmediato.
+            // El secreto ESTÁ AQUÍ: Si ya salió de la zona de peligro, detiene la huida de inmediato.
             if (!isInDangerZone()) {
                 return false;
             }
@@ -1718,7 +2036,7 @@ public class PetAiModifier {
         @Override
         public void stop() {
             this.fox.getNavigation().stop(); // Se clava en el piso
-            this.cooldown = 30; // Suspira aliviado por 1.5 segundos antes de volver a escanear
+            this.cooldown = 30;
         }
     }
 }
