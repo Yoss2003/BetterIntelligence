@@ -1,0 +1,13 @@
+{
+  "itemGroup.betterintelligence": "Example Mod Tab",
+  "block.betterintelligence.example_block": "Example Block",
+  "item.betterintelligence.example_item": "Example Item",
+
+  "betterintelligence.configuration.title": "Better Intelligence Configs",
+  "betterintelligence.configuration.section.betterintelligence.common.toml": "Better Intelligence Configs",
+  "betterintelligence.configuration.section.betterintelligence.common.toml.title": "Better Intelligence Configs",
+  "betterintelligence.configuration.items": "Item List",
+  "betterintelligence.configuration.logDirtBlock": "Log Dirt Block",
+  "betterintelligence.configuration.magicNumberIntroduction": "Magic Number Text",
+  "betterintelligence.configuration.magicNumber": "Magic Number"
+}
