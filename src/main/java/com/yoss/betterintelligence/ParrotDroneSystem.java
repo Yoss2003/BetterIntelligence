@@ -206,4 +206,20 @@ public class ParrotDroneSystem {
             }
         }
     }
+
+    @SubscribeEvent
+    public static void onPlayerLoggedOut(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event) {
+        UUID playerId = event.getEntity().getUUID();
+        PLAYER_HEAL_BUFFER.remove(playerId);
+        SECRET_FALL_TRACKER.remove(playerId);
+        HAD_PARROT_LAST_TICK.remove(playerId);
+        JUST_HEALED_FROM_SHOULDER.remove(playerId);
+    }
+
+    @SubscribeEvent
+    public static void onParrotDeath(net.neoforged.neoforge.event.entity.living.LivingDeathEvent event) {
+        if (event.getEntity() instanceof Parrot parrot) {
+            PARROT_COOLDOWNS.remove(parrot.getUUID());
+        }
+    }
 }

@@ -9,5 +9,10 @@
   "betterintelligence.configuration.items": "Item List",
   "betterintelligence.configuration.logDirtBlock": "Log Dirt Block",
   "betterintelligence.configuration.magicNumberIntroduction": "Magic Number Text",
-  "betterintelligence.configuration.magicNumber": "Magic Number"
+  "betterintelligence.configuration.magicNumber": "Magic Number",
+
+  "item.minecraft.potion.effect.immunity": "Poción de Inmunidad",
+  "item.minecraft.splash_potion.effect.immunity": "Poción Arrojadiza de Inmunidad",
+  "item.minecraft.lingering_potion.effect.immunity": "Poción Persistente de Inmunidad",
+  "effect.betterintelligence.tactical_immunity": "Inmunidad"
 }

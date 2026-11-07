@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:brewing",
+  "reagent": {
+    "item": "minecraft:glowstone_dust"
+  },
+  "input": {
+    "item": "minecraft:splash_potion",
+    "components": {
+      "minecraft:potion_contents": "betterintelligence:immunity"
+    }
+  },
+  "output": {
+    "id": "minecraft:splash_potion",
+    "components": {
+      "minecraft:potion_contents": "betterintelligence:strong_immunity"
+    }
+  }
+}

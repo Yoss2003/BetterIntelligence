@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:brewing",
+  "reagent": {
+    "item": "minecraft:redstone"
+  },
+  "input": {
+    "item": "minecraft:potion",
+    "components": {
+      "minecraft:potion_contents": "betterintelligence:immunity"
+    }
+  },
+  "output": {
+    "id": "minecraft:potion",
+    "components": {
+      "minecraft:potion_contents": "betterintelligence:long_immunity"
+    }
+  }
+}

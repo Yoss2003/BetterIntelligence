@@ -1,5 +1,6 @@
 package com.yoss.betterintelligence;
 
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.animal.fox.Fox;
 import net.minecraft.world.item.ItemStack;
@@ -19,7 +20,7 @@ public class FoxWeaponLockGoal extends Goal {
     @Override
     public void tick() {
         ItemStack itemInMouth = this.fox.getMainHandItem();
-        this.fox.setCanPickUpLoot(!itemInMouth.is(net.minecraft.tags.ItemTags.SWORDS) &&
-                !itemInMouth.is(net.minecraft.tags.ItemTags.AXES)); // Ponemos el candado mental
+        this.fox.setCanPickUpLoot(!itemInMouth.is(ItemTags.SWORDS) &&
+                !itemInMouth.is(ItemTags.AXES));
     }
 }

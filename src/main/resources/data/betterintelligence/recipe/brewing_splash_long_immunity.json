@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:brewing",
+  "reagent": {
+    "item": "minecraft:gunpowder"
+  },
+  "input": {
+    "item": "minecraft:potion",
+    "components": {
+      "minecraft:potion_contents": "betterintelligence:long_immunity"
+    }
+  },
+  "output": {
+    "id": "minecraft:splash_potion",
+    "components": {
+      "minecraft:potion_contents": "betterintelligence:long_immunity"
+    }
+  }
+}

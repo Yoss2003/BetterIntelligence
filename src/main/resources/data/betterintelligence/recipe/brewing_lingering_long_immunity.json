@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:brewing",
+  "reagent": {
+    "item": "minecraft:dragon_breath"
+  },
+  "input": {
+    "item": "minecraft:splash_potion",
+    "components": {
+      "minecraft:potion_contents": "betterintelligence:long_immunity"
+    }
+  },
+  "output": {
+    "id": "minecraft:lingering_potion",
+    "components": {
+      "minecraft:potion_contents": "betterintelligence:long_immunity"
+    }
+  }
+}

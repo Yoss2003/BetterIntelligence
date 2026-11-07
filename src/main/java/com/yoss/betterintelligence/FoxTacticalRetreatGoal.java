@@ -13,7 +13,6 @@ public class FoxTacticalRetreatGoal extends Goal {
     public FoxTacticalRetreatGoal(Fox fox, double speedModifier) {
         this.fox = fox;
         this.speedModifier = speedModifier;
-        // Obliga al motor a cancelar cualquier ataque o persecución activa.
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.TARGET));
     }
 
@@ -30,7 +29,7 @@ public class FoxTacticalRetreatGoal extends Goal {
 
         for (Player p : players) {
             // Usamos el Helper para verificar sin errores
-            if (com.yoss.betterintelligence.FoxTrustHelper.trusts(this.fox, p)) {
+            if (FoxTrustHelper.trusts(this.fox, p)) {
                 double dist = this.fox.distanceToSqr(p);
                 if (dist < closestDist) {
                     closestDist = dist;
@@ -44,13 +43,11 @@ public class FoxTacticalRetreatGoal extends Goal {
 
     @Override
     public void start() {
-        // Al iniciar la retirada, le borramos al enemigo de su memoria.
         this.fox.setTarget(null);
     }
 
     @Override
     public void tick() {
-        // Mantiene el estado pacífico y corre hacia su jefe a toda velocidad
         this.fox.setTarget(null);
         if (this.closestTrustedPlayer != null) {
             this.fox.getNavigation().moveTo(this.closestTrustedPlayer, this.speedModifier);
